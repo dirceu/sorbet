@@ -1,4 +1,5 @@
 #include "NextMethodFinder.h"
+#include "ast/treemap/treemap.h"
 #include "core/GlobalState.h"
 
 using namespace std;
@@ -18,7 +19,7 @@ void NextMethodFinder::preTransformClassDef(core::Context ctx, ast::ExpressionPt
         // `loc` is contained in the current narrowestClassDefRange, and still contains `queryLoc`
         this->narrowestClassDefRange = loc;
 
-        if (this->result().exists() && !loc.contains(this->result_.first)) {
+        if (this->result_.second.exists() && !loc.contains(this->result_.first)) {
             // If there's a result and it's not contained in the new narrowest range, we have to toss it out
             // (Method defs and class defs are not necessarily sorted by their locs)
             this->result_ = {core::Loc::none(), core::Symbols::noMethod()};
@@ -69,7 +70,7 @@ void NextMethodFinder::preTransformMethodDef(core::Context ctx, ast::ExpressionP
     // Current method starts at or after query loc. Starting 'at' is fine, because it can happen in cases like this:
     //   |def foo; end
 
-    if (this->result().exists()) {
+    if (this->result_.second.exists()) {
         // Method defs are not guaranteed to be sorted in order by their declLocs
         auto resultLoc = this->result_.first;
         if (currentLoc.beginPos() < resultLoc.beginPos()) {
@@ -87,8 +88,13 @@ void NextMethodFinder::preTransformMethodDef(core::Context ctx, ast::ExpressionP
     }
 }
 
-const core::MethodRef NextMethodFinder::result() const {
-    return this->result_.second;
+core::MethodRef NextMethodFinder::firstMethodAfterQuery(const core::GlobalState &gs, ast::ExpressionPtr &tree,
+                                                        core::Loc queryLoc) {
+    NextMethodFinder nextMethodFinder(queryLoc);
+    auto ctx = core::Context(gs, core::Symbols::root(), queryLoc.file());
+    ast::TreeWalk::apply(ctx, nextMethodFinder, tree);
+
+    return nextMethodFinder.result_.second;
 }
 
 }; // namespace sorbet::realmain::lsp

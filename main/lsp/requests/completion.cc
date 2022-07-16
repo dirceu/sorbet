@@ -620,17 +620,9 @@ vector<core::NameRef> localNamesForMethod(LSPTypecheckerInterface &typechecker, 
 }
 
 core::MethodRef firstMethodAfterQuery(LSPTypecheckerInterface &typechecker, const core::Loc queryLoc) {
-    const auto &gs = typechecker.state();
     auto files = vector<core::FileRef>{queryLoc.file()};
     auto resolved = typechecker.getResolved(files);
-
-    NextMethodFinder nextMethodFinder(queryLoc);
-    for (auto &t : resolved) {
-        auto ctx = core::Context(gs, core::Symbols::root(), t.file);
-        ast::TreeWalk::apply(ctx, nextMethodFinder, t.tree);
-    }
-
-    return nextMethodFinder.result();
+    return NextMethodFinder::firstMethodAfterQuery(typechecker.state(), resolved.front().tree, queryLoc);
 }
 
 // This code is ugly but I'm convinced it's because of C++'s baroque string APIs, not for lack

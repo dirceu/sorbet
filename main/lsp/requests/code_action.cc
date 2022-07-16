@@ -4,6 +4,7 @@
 #include "core/lsp/QueryResponse.h"
 #include "main/lsp/LSPQuery.h"
 #include "main/lsp/MoveMethod.h"
+#include "main/lsp/NextMethodFinder.h"
 #include "main/lsp/json_types.h"
 #include "main/lsp/lsp.h"
 #include "main/sig_finder/sig_finder.h"
@@ -70,6 +71,34 @@ hasLoneClassMethodResponse(const core::GlobalState &gs, const vector<unique_ptr<
 
     return found;
 }
+
+core::MethodRef firstMethodAfterQuery(LSPTypecheckerInterface &typechecker, const core::Loc queryLoc) {
+    auto files = vector<core::FileRef>{queryLoc.file()};
+    auto resolved = typechecker.getResolved(files);
+    return NextMethodFinder::firstMethodAfterQuery(typechecker.state(), resolved.front().tree, queryLoc);
+}
+
+// TODO(jez) Delay resolution
+unique_ptr<CodeAction> tryMakeMultilineSigAction(LSPTypecheckerInterface &typechecker, string uri, core::Loc queryLoc,
+                                                 const core::lsp::SendResponse &send) {
+    auto &gs = typechecker.state();
+    auto nextMethod = firstMethodAfterQuery(typechecker, queryLoc);
+    if (!nextMethod.exists()) {
+        return nullptr;
+    }
+    auto sig = prettySigForMethod(gs, nextMethod, nullptr, nextMethod.data(gs)->resultType, nullptr);
+
+    auto result = make_unique<CodeAction>("jez wip title");
+    result->kind = CodeActionKind::RefactorRewrite;
+    auto workspaceEdit = make_unique<WorkspaceEdit>();
+    auto textEdits = vector<unique_ptr<TextEdit>>{};
+    textEdits.emplace_back(make_unique<TextEdit>(Range::fromLoc(gs, send.termLoc), move(sig)));
+    workspaceEdit->documentChanges->emplace_back(make_unique<TextDocumentEdit>(
+        make_unique<VersionedTextDocumentIdentifier>(move(uri), JSONNullObject()), move(textEdits)));
+    result->edit = move(workspaceEdit);
+    return result;
+}
+
 } // namespace
 
 CodeActionTask::CodeActionTask(const LSPConfiguration &config, MessageId id, unique_ptr<CodeActionParams> params)
@@ -169,8 +198,16 @@ unique_ptr<ResponseMessage> CodeActionTask::runRequest(LSPTypecheckerInterface &
     auto queryResult = LSPQuery::byLoc(config, typechecker, params->textDocument->uri, *params->range->start,
                                        LSPMethod::TextDocumentCodeAction, false);
 
-    // Generate "Move method" code actions only for class method definitions
-    if (queryResult.error == nullptr) {
+    if (queryResult.error == nullptr && !queryResult.responses.empty()) {
+        auto queryLoc = loc.copyWithZeroLength();
+        if (auto *send = queryResult.responses.front()->isSend()) {
+            auto action = tryMakeMultilineSigAction(typechecker, params->textDocument->uri, queryLoc, *send);
+            if (action != nullptr) {
+                result.emplace_back(move(action));
+            }
+        }
+
+        // Generate "Move method" code actions only for class method definitions
         if (auto *def = hasLoneClassMethodResponse(gs, queryResult.responses)) {
             auto action = make_unique<CodeAction>("Move method to a new module");
             action->kind = CodeActionKind::RefactorExtract;

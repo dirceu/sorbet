@@ -28,7 +28,8 @@ public:
     void postTransformClassDef(core::Context ctx, ast::ExpressionPtr &tree);
     void preTransformMethodDef(core::Context ctx, ast::ExpressionPtr &tree);
 
-    const core::MethodRef result() const;
+    static core::MethodRef firstMethodAfterQuery(const core::GlobalState &gs, ast::ExpressionPtr &tree,
+                                                 core::Loc queryLoc);
 };
 }; // namespace sorbet::realmain::lsp
 
